@@ -1,0 +1,58 @@
+version: '3.8'
+
+# Development Docker Compose configuration with live reloading
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: educore-mongodb-dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_dev_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: educore-redis-dev
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ../educore-backend
+      dockerfile: Dockerfile
+    container_name: educore-backend-dev
+    command: npm run dev
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - MONGO_URI=mongodb://mongodb:27017/educore_lms
+      - REDIS_DRIVER=auto
+      - REDIS_URL=redis://redis:6379
+      - CORS_ORIGIN=http://localhost:3000
+    volumes:
+      - ../educore-backend:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+
+  frontend:
+    build:
+      context: ../educore-frontend
+      dockerfile: Dockerfile
+    container_name: educore-frontend-dev
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:4000/api/v1
+    volumes:
+      - ../educore-frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_dev_data:
