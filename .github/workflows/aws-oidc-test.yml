@@ -53,6 +53,8 @@ jobs:
               "aud": claims.get("aud"),
               "repository": claims.get("repository"),
               "repository_owner": claims.get("repository_owner"),
+              "repository_id": claims.get("repository_id"),
+              "repository_owner_id": claims.get("repository_owner_id"),
               "ref": claims.get("ref"),
               "workflow_ref": claims.get("workflow_ref")
           }, indent=2))
