@@ -1,0 +1,78 @@
+name: Build and Push Docker Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: 265222804652.dkr.ecr.ap-south-1.amazonaws.com
+  BACKEND_IMAGE: educore-backend
+  FRONTEND_IMAGE: educore-frontend
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout deployment repository
+        uses: actions/checkout@v4
+
+      - name: Checkout backend repository
+        uses: actions/checkout@v4
+        with:
+          repository: Nouriensha/Educore-backend
+          path: backend
+
+      - name: Checkout frontend repository
+        uses: actions/checkout@v4
+        with:
+          repository: Nouriensha/Educore-frontend
+          path: frontend
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$BACKEND_IMAGE:${GITHUB_SHA} \
+            -t $ECR_REGISTRY/$BACKEND_IMAGE:latest \
+            ./backend
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            --build-arg VITE_API_URL=/api/v1 \
+            -t $ECR_REGISTRY/$FRONTEND_IMAGE:${GITHUB_SHA} \
+            -t $ECR_REGISTRY/$FRONTEND_IMAGE:latest \
+            ./frontend
+
+      - name: Push backend image
+        run: |
+          docker push $ECR_REGISTRY/$BACKEND_IMAGE:${GITHUB_SHA}
+          docker push $ECR_REGISTRY/$BACKEND_IMAGE:latest
+
+      - name: Push frontend image
+        run: |
+          docker push $ECR_REGISTRY/$FRONTEND_IMAGE:${GITHUB_SHA}
+          docker push $ECR_REGISTRY/$FRONTEND_IMAGE:latest
+
+      - name: Show pushed images
+        run: |
+          echo "Backend image:"
+          echo "$ECR_REGISTRY/$BACKEND_IMAGE:${GITHUB_SHA}"
+
+          echo "Frontend image:"
+          echo "$ECR_REGISTRY/$FRONTEND_IMAGE:${GITHUB_SHA}"
