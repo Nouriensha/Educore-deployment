@@ -1,14 +1,8 @@
-version: '3.8'
-
 services:
   mongodb:
     image: mongo:7.0
     container_name: educore-mongodb
     restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_DATABASE: educore_lms
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -24,8 +18,6 @@ services:
     image: redis:7-alpine
     container_name: educore-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,27 +30,18 @@ services:
       - educore-network
 
   backend:
-    build:
-      context: ../educore-backend
-      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/educore-backend:${BACKEND_IMAGE_TAG:-latest}
     container_name: educore-backend
     restart: unless-stopped
-    ports:
-      - "4000:4000"
     env_file:
-      - ../educore-backend/.env
+      - .env.production
     environment:
-      - NODE_ENV=production
-      - PORT=4000
-      - MONGO_URI=mongodb://mongodb:27017/educore_lms
-      - REDIS_DRIVER=redis
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - CLIENT_URL=http://localhost:3000
-      - API_PUBLIC_URL=http://localhost:4000
-      - COOKIE_SECURE=false
-      - COOKIE_SAME_SITE=lax
-      - TRUST_PROXY=true
+      NODE_ENV: production
+      PORT: 4000
+      MONGO_URI: mongodb://mongodb:27017/educore_lms
+      REDIS_DRIVER: redis
+      REDIS_URL: redis://redis:6379
+      TRUST_PROXY: "true"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -68,21 +51,46 @@ services:
       - backend_uploads:/app/uploads
     networks:
       - educore-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:4000/health"
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
 
   frontend:
-    build:
-      context: ../educore-frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: http://localhost:3000/api/v1
+    image: ${ECR_REGISTRY}/educore-frontend:${FRONTEND_IMAGE_TAG:-latest}
     container_name: educore-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - educore-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:80/"
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
 
 networks:
   educore-network:
@@ -91,7 +99,9 @@ networks:
 volumes:
   mongodb_data:
     driver: local
+
   redis_data:
     driver: local
+
   backend_uploads:
     driver: local
