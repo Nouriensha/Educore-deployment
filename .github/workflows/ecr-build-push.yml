@@ -78,55 +78,105 @@ jobs:
             --instance-ids i-0660dbddedf736446 \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "set -e",
+              "set -u",
               "cd /home/ubuntu/apps/educore/deployment",
               "echo ========================================",
-              "echo Starting EduCore deployment",
+              "echo EduCore Deployment",
               "echo ========================================",
               "echo",
-              "echo Recording currently running image versions...",
-              "PREVIOUS_BACKEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-backend)",
-              "PREVIOUS_FRONTEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-frontend)",
+
+              "PREVIOUS_BACKEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-backend 2>/dev/null || true)",
+              "PREVIOUS_FRONTEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-frontend 2>/dev/null || true)",
+
               "PREVIOUS_BACKEND_TAG=${PREVIOUS_BACKEND_IMAGE##*:}",
               "PREVIOUS_FRONTEND_TAG=${PREVIOUS_FRONTEND_IMAGE##*:}",
+
               "echo Previous backend: $PREVIOUS_BACKEND_TAG",
               "echo Previous frontend: $PREVIOUS_FRONTEND_TAG",
+              "echo New deployment: ${GITHUB_SHA}",
+
+              "printf \"BACKEND_IMAGE_TAG=%s\\nFRONTEND_IMAGE_TAG=%s\\n\" \"$PREVIOUS_BACKEND_TAG\" \"$PREVIOUS_FRONTEND_TAG\" | sudo tee .previous-images >/dev/null",
+
               "echo",
               "echo Logging in to Amazon ECR...",
               "aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 265222804652.dkr.ecr.ap-south-1.amazonaws.com",
+
               "echo",
               "echo Pulling new application images...",
               "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose pull backend frontend",
+
               "echo",
               "echo Starting new application containers...",
               "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose up -d backend frontend",
+
               "echo",
               "echo Waiting for application containers...",
               "sleep 15",
+
               "echo",
-              "echo Current container status:",
-              "sudo docker compose ps",
-              "echo",
-              "echo Checking backend container health...",
+              "echo Checking backend container...",
               "BACKEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-backend)",
-              "echo Backend container health: $BACKEND_HEALTH",
-              "if [ \"$BACKEND_HEALTH\" != \"healthy\" ]; then echo \"Backend container is unhealthy\"; exit 1; fi",
+              "echo Backend health: $BACKEND_HEALTH",
+
               "echo",
-              "echo Checking frontend container health...",
+              "echo Checking frontend container...",
               "FRONTEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-frontend)",
-              "echo Frontend container health: $FRONTEND_HEALTH",
-              "if [ \"$FRONTEND_HEALTH\" != \"healthy\" ]; then echo \"Frontend container is unhealthy\"; exit 1; fi",
+              "echo Frontend health: $FRONTEND_HEALTH",
+
               "echo",
               "echo Checking backend API...",
-              "sudo docker exec educore-backend wget -qO- http://127.0.0.1:4000/health",
+              "BACKEND_API=$(sudo docker exec educore-backend wget -qO- http://127.0.0.1:4000/health)",
+              "echo \"$BACKEND_API\"",
+
               "echo",
-              "echo Checking frontend HTTP response...",
-              "sudo docker exec educore-frontend wget -qO- http://127.0.0.1:80/ >/dev/null",
-              "echo Frontend HTTP check passed.",
+              "if [ \"$BACKEND_HEALTH\" = \"healthy\" ] && [ \"$FRONTEND_HEALTH\" = \"healthy\" ]; then",
+              "  echo \"========================================\"",
+              "  echo \"Deployment health checks passed\"",
+              "  echo \"========================================\"",
+              "  exit 0",
+              "fi",
+
               "echo",
-              "echo ========================================",
-              "echo Deployment health checks passed",
-              "echo ========================================"
+              "echo \"========================================\"",
+              "echo \"NEW DEPLOYMENT FAILED\"",
+              "echo \"Starting automatic rollback\"",
+              "echo \"========================================\"",
+
+              "if [ -z \"$PREVIOUS_BACKEND_TAG\" ] || [ -z \"$PREVIOUS_FRONTEND_TAG\" ]; then",
+              "  echo \"Previous image tags could not be determined.\"",
+              "  exit 1",
+              "fi",
+
+              "echo",
+              "echo Pulling previous application images...",
+              "sudo BACKEND_IMAGE_TAG=\"$PREVIOUS_BACKEND_TAG\" FRONTEND_IMAGE_TAG=\"$PREVIOUS_FRONTEND_TAG\" docker compose pull backend frontend",
+
+              "echo",
+              "echo Restoring previous application...",
+              "sudo BACKEND_IMAGE_TAG=\"$PREVIOUS_BACKEND_TAG\" FRONTEND_IMAGE_TAG=\"$PREVIOUS_FRONTEND_TAG\" docker compose up -d backend frontend",
+
+              "echo",
+              "echo Waiting for rollback...",
+              "sleep 15",
+
+              "ROLLBACK_BACKEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-backend)",
+              "ROLLBACK_FRONTEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-frontend)",
+
+              "echo Rollback backend health: $ROLLBACK_BACKEND_HEALTH",
+              "echo Rollback frontend health: $ROLLBACK_FRONTEND_HEALTH",
+
+              "if [ \"$ROLLBACK_BACKEND_HEALTH\" = \"healthy\" ] && [ \"$ROLLBACK_FRONTEND_HEALTH\" = \"healthy\" ]; then",
+              "  echo \"========================================\"",
+              "  echo \"Rollback successful\"",
+              "  echo \"Previous version restored\"",
+              "  echo \"========================================\"",
+              "  exit 1",
+              "fi",
+
+              "echo \"========================================\"",
+              "echo \"CRITICAL: Rollback health checks failed\"",
+              "echo \"========================================\"",
+              "exit 1"
             ]' \
             --query 'Command.CommandId' \
             --output text)
@@ -137,22 +187,9 @@ jobs:
             --region $AWS_REGION \
             --command-id "$COMMAND_ID" \
             --instance-id i-0660dbddedf736446; then
-
-            echo "Deployment command completed successfully."
-
+            echo "Deployment completed successfully."
           else
-
-            echo "Deployment health checks failed."
-            echo "Retrieving deployment failure details..."
-
-            aws ssm get-command-invocation \
-              --region $AWS_REGION \
-              --command-id "$COMMAND_ID" \
-              --instance-id i-0660dbddedf736446 \
-              --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
-              --output json
-
-            exit 1
+            echo "Deployment command failed."
           fi
 
           aws ssm get-command-invocation \
@@ -161,6 +198,17 @@ jobs:
             --instance-id i-0660dbddedf736446 \
             --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
             --output json
+
+          COMMAND_STATUS=$(aws ssm get-command-invocation \
+            --region $AWS_REGION \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-0660dbddedf736446 \
+            --query 'Status' \
+            --output text)
+
+          if [ "$COMMAND_STATUS" != "Success" ]; then
+            exit 1
+          fi
 
       - name: Show pushed images
         run: |
