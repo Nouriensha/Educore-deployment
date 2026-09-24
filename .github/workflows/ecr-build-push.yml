@@ -80,33 +80,81 @@ jobs:
             --parameters 'commands=[
               "set -e",
               "cd /home/ubuntu/apps/educore/deployment",
+              "echo ========================================",
+              "echo Starting EduCore deployment",
+              "echo ========================================",
+              "echo",
+              "echo Recording currently running image versions...",
+              "PREVIOUS_BACKEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-backend)",
+              "PREVIOUS_FRONTEND_IMAGE=$(sudo docker inspect --format=\"{{.Config.Image}}\" educore-frontend)",
+              "PREVIOUS_BACKEND_TAG=${PREVIOUS_BACKEND_IMAGE##*:}",
+              "PREVIOUS_FRONTEND_TAG=${PREVIOUS_FRONTEND_IMAGE##*:}",
+              "echo Previous backend: $PREVIOUS_BACKEND_TAG",
+              "echo Previous frontend: $PREVIOUS_FRONTEND_TAG",
+              "echo",
               "echo Logging in to Amazon ECR...",
               "aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 265222804652.dkr.ecr.ap-south-1.amazonaws.com",
-              "echo Pulling new images...",
-              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose pull",
-              "echo Starting updated containers...",
-              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose up -d",
-              "echo Waiting for containers...",
+              "echo",
+              "echo Pulling new application images...",
+              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose pull backend frontend",
+              "echo",
+              "echo Starting new application containers...",
+              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose up -d backend frontend",
+              "echo",
+              "echo Waiting for application containers...",
               "sleep 15",
-              "echo Container status:",
+              "echo",
+              "echo Current container status:",
               "sudo docker compose ps",
-              "echo Checking backend health...",
+              "echo",
+              "echo Checking backend container health...",
+              "BACKEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-backend)",
+              "echo Backend container health: $BACKEND_HEALTH",
+              "if [ \"$BACKEND_HEALTH\" != \"healthy\" ]; then echo \"Backend container is unhealthy\"; exit 1; fi",
+              "echo",
+              "echo Checking frontend container health...",
+              "FRONTEND_HEALTH=$(sudo docker inspect --format=\"{{.State.Health.Status}}\" educore-frontend)",
+              "echo Frontend container health: $FRONTEND_HEALTH",
+              "if [ \"$FRONTEND_HEALTH\" != \"healthy\" ]; then echo \"Frontend container is unhealthy\"; exit 1; fi",
+              "echo",
+              "echo Checking backend API...",
               "sudo docker exec educore-backend wget -qO- http://127.0.0.1:4000/health",
               "echo",
-              "echo Checking frontend health...",
-              "sudo docker exec educore-frontend wget -qO- http://127.0.0.1:80/",
               "echo",
-              "echo Deployment completed successfully."
+              "echo Checking frontend HTTP response...",
+              "sudo docker exec educore-frontend wget -qO- http://127.0.0.1:80/ >/dev/null",
+              "echo Frontend HTTP check passed.",
+              "echo",
+              "echo ========================================",
+              "echo Deployment health checks passed",
+              "echo ========================================"
             ]' \
             --query 'Command.CommandId' \
             --output text)
 
           echo "Deployment Command ID: $COMMAND_ID"
 
-          aws ssm wait command-executed \
+          if aws ssm wait command-executed \
             --region $AWS_REGION \
             --command-id "$COMMAND_ID" \
-            --instance-id i-0660dbddedf736446
+            --instance-id i-0660dbddedf736446; then
+
+            echo "Deployment command completed."
+
+          else
+
+            echo "Deployment health checks failed."
+            echo "The EC2 deployment command failed."
+
+            aws ssm get-command-invocation \
+              --region $AWS_REGION \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-0660dbddedf736446 \
+              --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+              --output json
+
+            exit 1
+          fi
 
           aws ssm get-command-invocation \
             --region $AWS_REGION \
