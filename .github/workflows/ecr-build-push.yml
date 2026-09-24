@@ -40,7 +40,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-                - name: Test SSM deployment access
+      - name: Test SSM deployment access
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --region $AWS_REGION \
