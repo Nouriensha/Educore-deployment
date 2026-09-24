@@ -40,29 +40,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Test SSM deployment access
-        run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --region $AWS_REGION \
-            --instance-ids i-0660dbddedf736446 \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["echo SSM_WORKS","whoami","hostname"]' \
-            --query 'Command.CommandId' \
-            --output text)
-
-          echo "SSM Command ID: $COMMAND_ID"
-
-          aws ssm wait command-executed \
-            --region $AWS_REGION \
-            --command-id "$COMMAND_ID" \
-            --instance-id i-0660dbddedf736446
-
-          aws ssm get-command-invocation \
-            --region $AWS_REGION \
-            --command-id "$COMMAND_ID" \
-            --instance-id i-0660dbddedf736446 \
-            --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
-            --output json
+   
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -92,6 +70,50 @@ jobs:
         run: |
           docker push $ECR_REGISTRY/$FRONTEND_IMAGE:${GITHUB_SHA}
           docker push $ECR_REGISTRY/$FRONTEND_IMAGE:latest
+
+      - name: Deploy to EC2
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --region $AWS_REGION \
+            --instance-ids i-0660dbddedf736446 \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "set -e",
+              "cd /home/ubuntu/apps/educore/deployment",
+              "echo Logging in to Amazon ECR...",
+              "aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 265222804652.dkr.ecr.ap-south-1.amazonaws.com",
+              "echo Pulling new images...",
+              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose pull",
+              "echo Starting updated containers...",
+              "sudo BACKEND_IMAGE_TAG='${GITHUB_SHA}' FRONTEND_IMAGE_TAG='${GITHUB_SHA}' docker compose up -d",
+              "echo Waiting for containers...",
+              "sleep 15",
+              "echo Container status:",
+              "sudo docker compose ps",
+              "echo Checking backend health...",
+              "sudo docker exec educore-backend wget -qO- http://127.0.0.1:4000/health",
+              "echo",
+              "echo Checking frontend health...",
+              "sudo docker exec educore-frontend wget -qO- http://127.0.0.1:80/",
+              "echo",
+              "echo Deployment completed successfully."
+            ]' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "Deployment Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --region $AWS_REGION \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-0660dbddedf736446
+
+          aws ssm get-command-invocation \
+            --region $AWS_REGION \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-0660dbddedf736446 \
+            --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+            --output json
 
       - name: Show pushed images
         run: |
