@@ -37,6 +37,14 @@ jobs:
           repository: Nouriensha/Educore-frontend
           path: frontend
 
+      - name: Show source commits
+        run: |
+          echo "Backend commit:"
+          git -C backend rev-parse HEAD
+
+          echo "Frontend commit:"
+          git -C frontend rev-parse HEAD   
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
