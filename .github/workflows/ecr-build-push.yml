@@ -139,11 +139,17 @@ jobs:
 
           echo
 
-          if [ "$BACKEND_HEALTH" = "healthy" ] && [ "$FRONTEND_HEALTH" = "healthy" ]; then
-            echo "========================================"
-            echo "Deployment health checks passed"
-            echo "========================================"
-            exit 0
+          FORCE_ROLLBACK_TEST=true
+
+          if [ "$FORCE_ROLLBACK_TEST" = "false" ] && \
+          [ "$BACKEND_HEALTH" = "healthy" ] && \
+          [ "$FRONTEND_HEALTH" = "healthy" ]; then
+
+          echo "========================================"
+          echo "Deployment health checks passed"
+          echo "========================================"
+
+          exit 0
           fi
 
           echo
