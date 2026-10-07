@@ -61,11 +61,21 @@ jobs:
           PY
 
       - name: Configure AWS credentials
+        id: configure_aws
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      - name: Explain OIDC assume-role failures
+        if: always() && steps.configure_aws.outcome != 'success'
+        run: |
+          echo "::warning::Could not assume role with OIDC. This repository uses immutable OIDC subject claims that include owner/repository IDs."
+          echo "::warning::Update the AWS IAM trust policy for ${{ vars.AWS_ROLE_ARN }} to allow this subject format:"
+          echo "::warning::repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}:ref:${{ github.ref }}"
+
       - name: Verify AWS identity
+        if: steps.configure_aws.outcome == 'success'
         run: |
           aws sts get-caller-identity
