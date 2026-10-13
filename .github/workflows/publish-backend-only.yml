@@ -1,0 +1,64 @@
+name: Publish Backend Image Only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: 265222804652.dkr.ecr.ap-south-1.amazonaws.com
+  BACKEND_IMAGE: educore-backend
+
+jobs:
+  publish-backend:
+    name: Build and Push Backend Only
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout backend repository
+        uses: actions/checkout@v4
+        with:
+          repository: Nouriensha/Educore-backend
+          ref: 6544f8d7a337d0ec1aa066ea015ee44ed9149015
+          path: backend
+
+      - name: Verify source commit
+        working-directory: backend
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          EXPECTED_SHA="6544f8d7a337d0ec1aa066ea015ee44ed9149015"
+
+          echo "Backend commit: $ACTUAL_SHA"
+
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "Unexpected backend commit."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t "$ECR_REGISTRY/$BACKEND_IMAGE:6544f8d7a337d0ec1aa066ea015ee44ed9149015" \
+            ./backend
+
+      - name: Push backend image
+        run: |
+          docker push \
+            "$ECR_REGISTRY/$BACKEND_IMAGE:6544f8d7a337d0ec1aa066ea015ee44ed9149015"
+
+      - name: Verify published image
+        run: |
+          echo "Published backend image:"
+          echo "$ECR_REGISTRY/$BACKEND_IMAGE:6544f8d7a337d0ec1aa066ea015ee44ed9149015"
